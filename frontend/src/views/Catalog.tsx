@@ -95,23 +95,39 @@ export function Ingredients() {
   const { me, canSpec, notify } = useApp();
   const { data, error, loading } = useApi<Ingredient[]>('/api/ingredients');
   const [edit, setEdit] = useState<Ingredient | 'new' | null>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [state, setState] = useState('active');
+  const [page, setPage] = useState(1);
+  const [allNutrients, setAllNutrients] = useState(false);
   const { run } = useAction();
   const n = (i: Ingredient, k: string) => (i.nutrients?.[k] == null ? '—' : num(i.nutrients[k]));
+  const core = ['dm', 'me', 'protein', 'calcium', 'phosphorus', 'available_phosphorus'];
+  const cols = allNutrients ? me.nutrients : me.nutrients.filter((x) => core.includes(x.key));
+  const categories = Array.from(new Set((data || []).map((i) => i.category || 'Other'))).sort();
+  const filtered = (data || []).filter((i) => (state === 'all' || (state === 'active' ? i.active : !i.active)) && (category === 'all' || (i.category || 'Other') === category) &&
+    (i.name + ' ' + (i.category || '') + ' ' + (i.source || '')).toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => a.name.localeCompare(b.name));
+  const pageSize = 25, pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount), rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   return (
     <>
-      <Heading eyebrow="Specifications" title="Ingredients" sub="Cost and nutrient analysis from supplier or laboratory records. Leave unknown values blank.">
+      <Heading eyebrow="Specifications" title="Ingredients" sub="Search and compare ingredient analyses. Unknown values are left blank.">
         <button className="btn btn-primary" disabled={!canSpec} onClick={() => setEdit('new')}>＋ Add ingredient</button>
       </Heading>
       {!canSpec && <div className="notice">Ingredient specifications are managed by an administrator or nutritionist.</div>}
       <section className="card">
         <Loading error={error} loading={loading && !data} />
-        <div className="tablewrap"><table>
-          <thead><tr><th>Ingredient</th><th>Category</th><th>Cost / kg</th>{me.nutrients.map((x) => <th key={x.key}>{x.label} ({x.unit})</th>)}<th></th></tr></thead>
-          <tbody>{(data || []).map((i) => (
+        <div className="catalogue-tools"><input type="search" value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search ingredients…" aria-label="Search ingredients" />
+          <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} aria-label="Filter category"><option value="all">All categories</option>{categories.map((c) => <option key={c}>{c}</option>)}</select>
+          <select value={state} onChange={(e) => { setState(e.target.value); setPage(1); }} aria-label="Filter ingredient status"><option value="active">Active</option><option value="all">All statuses</option><option value="archived">Archived</option></select>
+          <button className="btn btn-light btn-small" onClick={() => setAllNutrients(!allNutrients)}>{allNutrients ? 'Show key nutrients' : 'Show all nutrients'}</button><span>{filtered.length} ingredients</span></div>
+        <div className="tablewrap catalogue-tablewrap"><table className="catalogue-table">
+          <thead><tr><th>Ingredient</th><th>Category</th><th>Cost / kg</th>{cols.map((x) => <th key={x.key}>{x.label}<small>{x.unit}</small></th>)}<th></th></tr></thead>
+          <tbody>{rows.map((i) => (
             <tr key={i.id}>
               <td className="strong">{i.name}{!i.active && <span className="muted"> (archived)</span>}<div className="muted" style={{ fontSize: 10 }}>{i.source}</div></td>
               <td>{i.category || '—'}</td><td>{i.cost_per_kg == null ? '—' : money(i.cost_per_kg)}</td>
-              {me.nutrients.map((x) => <td key={x.key}>{x.key === 'ca_p_ratio' ? (i.nutrients?.calcium != null && i.nutrients?.phosphorus > 0 ? `${num(i.nutrients.calcium / i.nutrients.phosphorus)}:1` : '—') : n(i, x.key)}</td>)}
+              {cols.map((x) => <td key={x.key}>{x.key === 'ca_p_ratio' ? (i.nutrients?.calcium != null && i.nutrients?.phosphorus > 0 ? `${num(i.nutrients.calcium / i.nutrients.phosphorus)}:1` : '—') : n(i, x.key)}</td>)}
               <td className="row">
                 <button className="btn btn-light btn-small" disabled={!canSpec} onClick={() => setEdit(i)}>Edit</button>
                 <button className="btn btn-light btn-small" disabled={!canSpec}
@@ -120,7 +136,10 @@ export function Ingredients() {
               </td>
             </tr>))}</tbody>
         </table></div>
-        {!loading && !(data || []).length && <Empty>No ingredients yet.</Empty>}
+        {!loading && !filtered.length && <Empty>{data?.length ? 'No ingredients match your filters.' : 'No ingredients yet.'}</Empty>}
+        {filtered.length > pageSize && <div className="catalogue-pagination"><span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}</span>
+          <div className="row"><button className="btn btn-light btn-small" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>← Previous</button><span>Page {currentPage} of {pageCount}</span><button className="btn btn-light btn-small" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>Next →</button></div>
+        </div>}
       </section>
       <IngredientDialog item={edit} onClose={() => setEdit(null)} nutrients={me.nutrients} notify={notify} />
     </>

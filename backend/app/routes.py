@@ -208,7 +208,15 @@ def run_optimizer(body: OptimizeIn, ctx: Ctx = Depends(request_ctx)):
 # ------------------------------------------------------------------ formulations
 _LIST_COLS = ("id, product_id, version, kind, animal, batch_size_kg, status, created_at, created_by_email, "
               "submitted_at, reviewed_at, reviewed_by_email, review_note, summary, superseded_by_version, "
+              "targets, lines, "
               "(select name from public.products p where p.id = product_id) as product_name")
+
+
+def _refresh_summary(row: dict | None) -> dict | None:
+    """Recompute derived values from the immutable ingredient snapshots on reads."""
+    if row and row.get("lines") is not None and row.get("batch_size_kg") is not None:
+        row["summary"] = _summary(row["lines"], float(row["batch_size_kg"]), row.get("targets") or {})
+    return row
 
 
 @router.get("/formulations")
@@ -217,16 +225,16 @@ def list_formulations(status: str | None = None, product_id: str | None = None, 
         f"select {_LIST_COLS} from public.formulations where (%s::text is null or status=%s) "
         "and (%s::uuid is null or product_id=%s::uuid) order by created_at desc",
         [status, status, product_id, product_id])
-    return ctx.cur.fetchall()
+    return [_refresh_summary(row) for row in ctx.cur.fetchall()]
 
 
 @router.get("/formulations/{fid}")
 def get_formulation(fid: str, ctx: Ctx = Depends(request_ctx)):
-    ctx.cur.execute(f"select {_LIST_COLS}, notes, targets, lines, submitted_by_email from public.formulations where id=%s", [fid])
+    ctx.cur.execute(f"select {_LIST_COLS}, notes, submitted_by_email from public.formulations where id=%s", [fid])
     row = ctx.cur.fetchone()
     if not row:
         raise HTTPException(404, "Recipe version not found")
-    return row
+    return _refresh_summary(row)
 
 
 def _product(ctx: Ctx, pid: str) -> dict:
@@ -439,11 +447,15 @@ def report_summary(ctx: Ctx = Depends(request_ctx)):
 
 def _recipe_report(ctx: Ctx) -> list[dict]:
     ctx.cur.execute("""
-      select p.id, p.name, p.kind, f.version, f.status, f.batch_size_kg, f.summary
+      select p.id, p.name, p.kind, f.version, f.status, f.batch_size_kg, f.summary, f.targets, f.lines
       from public.products p
       left join lateral (select * from public.formulations x where x.product_id=p.id order by version desc limit 1) f on true
       where p.active order by lower(p.name)""")
-    return ctx.cur.fetchall()
+    rows = ctx.cur.fetchall()
+    for row in rows:
+        if row["version"] is not None and row["lines"] is not None:
+            row["summary"] = _summary(row["lines"], float(row["batch_size_kg"]), row["targets"] or {})
+    return rows
 
 
 @router.get("/reports/recipes")

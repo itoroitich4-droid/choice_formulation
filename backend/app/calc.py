@@ -111,6 +111,8 @@ def summarize(lines: list[dict], batch_size_kg: float, targets: dict | None) -> 
     for k, r in tg.items():
         v = nutrients.get(k)
         if v is None:
+            if k in DERIVED_NUTRIENTS:
+                warnings.append(f"{LABELS[k]} is incomplete because total phosphorus is zero or missing.")
             continue
         if r["min"] is not None and v < r["min"] - 1e-9:
             warnings.append(f"{LABELS[k]} is below the minimum target.")

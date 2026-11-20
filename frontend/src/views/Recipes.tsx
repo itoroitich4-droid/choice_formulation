@@ -304,7 +304,11 @@ export function RecipeEditor({ sourceId, open, onClose }: { sourceId: string | n
       if ((lo != null && (lo < 0 || lo > 100)) || (hi != null && (hi < 0 || hi > 100))) return 'Inclusion limits must be between 0 and 100%.';
       if (lo != null && hi != null && lo > hi) return 'An ingredient minimum is higher than its maximum.';
     }
-    for (const [k, v] of Object.entries(st.targets)) { const a = toNum(v.min), b = toNum(v.max); if (a != null && b != null && a > b) return `${k}: target minimum is higher than maximum.`; }
+    for (const [k, v] of Object.entries(st.targets)) {
+      const a = toNum(v.min), b = toNum(v.max);
+      if (a != null && b != null && a > b) return `${k}: target minimum is higher than maximum.`;
+      if (!['me', 'de', 'ca_p_ratio'].includes(k) && ((a != null && a > 100) || (b != null && b > 100))) return `${k}: percentage targets cannot exceed 100%.`;
+    }
     return '';
   };
 
@@ -387,6 +391,7 @@ export function RecipeEditor({ sourceId, open, onClose }: { sourceId: string | n
 
           {opt && opt.status !== 'optimal' && (
             <div className="notice"><b>{opt.message}</b>
+              {!!opt.warnings?.length && <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>{opt.warnings.map((warning: string, i: number) => <li key={i}>{warning}</li>)}</ul>}
               {opt.achievable && <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>{Object.values<any>(opt.achievable).map((a) => <li key={a.label}>{a.label}: the limits allow {num(a.lowest)} to {num(a.highest)}</li>)}</ul>}
               {!!opt.excluded?.length && <div>Left out: {opt.excluded.map((x: any) => `${x.name} (${x.reason})`).join('; ')}</div>}</div>)}
           {opt?.status === 'optimal' && (

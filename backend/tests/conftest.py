@@ -8,16 +8,18 @@ import pytest
 
 TEST_DB = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres@localhost:5433/postgres")
 SECRET = "test-secret-test-secret-test-secret-123456"
+ISSUER = "https://test.supabase.co/auth/v1"
 os.environ["DATABASE_URL"] = TEST_DB
 os.environ["SUPABASE_JWT_SECRET"] = SECRET
+os.environ["SUPABASE_URL"] = "https://test.supabase.co"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 
 
-def token(sub: str, email: str, exp_in: int = 3600) -> str:
-    return jwt.encode({"sub": sub, "email": email, "aud": "authenticated", "role": "authenticated",
+def token(sub: str, email: str, exp_in: int = 3600, issuer: str = ISSUER) -> str:
+    return jwt.encode({"sub": sub, "email": email, "iss": issuer, "aud": "authenticated", "role": "authenticated",
                        "exp": int(time.time()) + exp_in}, SECRET, algorithm="HS256")
 
 
@@ -41,6 +43,9 @@ def users(admin_db):
             admin_db.execute("insert into public.company_members (user_id, email, role) values (%s,%s,%s)",
                              [uid, email, role.rstrip("2")])
         out[role] = {"id": uid, "email": email, "h": {"Authorization": f"Bearer {token(uid, email)}"}}
+    uid = str(uuid.uuid4())
+    out["wrong_issuer"] = {"id": uid, "email": "wrong-issuer@choice.test",
+                           "h": {"Authorization": f"Bearer {token(uid, 'wrong-issuer@choice.test', issuer='https://attacker.invalid/auth/v1')}"}}
     return out
 
 

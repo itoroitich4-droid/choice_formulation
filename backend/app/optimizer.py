@@ -116,7 +116,7 @@ def optimize(candidates: list[Candidate], batch_size_kg: float, targets: dict | 
          "min_pct": limits.get((c.ref_type, c.ref_id), (None, None))[0],
          "max_pct": limits.get((c.ref_type, c.ref_id), (None, None))[1],
          "snapshot": {"cost_per_kg": c.cost_per_kg, "nutrients": c.nutrients}}
-        for c, q in zip(eligible, qty) if q > 0
+        for c, q in zip(eligible, qty)
     ]
     s = summarize(snap_lines, batch_size_kg, targets)
     if s["warnings"]:

@@ -38,3 +38,15 @@
   dialog[open]{position:static;width:100%!important;max-width:none;max-height:none;overflow:visible;box-shadow:none;border-radius:0}
   dialog::backdrop{display:none}
 }
+
+/* Ingredient catalogue and navigation usability */
+.sidebar{position:sticky;top:0;height:100vh;overflow:auto}.nav button{min-height:42px}
+.nav button.active{box-shadow:inset 3px 0 0 var(--lime);background:#ffffff20}.topbar{position:sticky;top:0;z-index:8}
+.catalogue-tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:12px;background:#f7f9f5;border:1px solid var(--line);border-radius:10px}
+.catalogue-tools input,.catalogue-tools select{min-height:38px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 10px}
+.catalogue-tools input{flex:1 1 240px}.catalogue-tools span{margin-left:auto;color:var(--muted);font-size:11px}
+.catalogue-tablewrap{max-height:65vh}.catalogue-table thead{position:sticky;top:0;z-index:2;background:#f5f7f2}
+.catalogue-table th small{display:block;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+.catalogue-table tbody tr:hover td{background:#f7faf5}
+.catalogue-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 4px;color:var(--muted);font-size:11px}
+@media(max-width:680px){.sidebar{position:fixed;z-index:20;inset:0 auto 0 -260px;width:245px;height:100dvh;transition:left .2s}.sidebar.open{left:0;box-shadow:0 0 0 100vmax #0007}.catalogue-tools>*{flex:1 1 130px}.catalogue-tools input{flex-basis:100%}.catalogue-tools span{flex-basis:100%;margin:0}.catalogue-tablewrap{max-height:60vh}.catalogue-pagination{align-items:flex-start;flex-direction:column}}

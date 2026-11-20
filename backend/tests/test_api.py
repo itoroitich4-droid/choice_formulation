@@ -1,8 +1,5 @@
 import pytest
 
-N = {"protein": 8, "me": 3.3, "fibre": 3, "calcium": 0.1, "phosphorus": 0.3, "lysine": 0.3, "methionine": 0.2}
-
-
 def ing(client, h, name, cost, protein, me, **kw):
     body = {"name": name, "cost_per_kg": cost, "nutrients": {"protein": protein, "me": me,
             "fibre": 2, "calcium": 0.1, "phosphorus": 0.2, "lysine": 0.4, "methionine": 0.2}, **kw}
@@ -29,6 +26,7 @@ def recipe(pid, lines, batch=100, targets=TARGETS):
 def test_requires_sign_in(client, users):
     assert client.get("/api/me").status_code == 401
     assert client.get("/api/me", headers={"Authorization": "Bearer nonsense"}).status_code == 401
+    assert client.get("/api/me", headers=users["wrong_issuer"]["h"]).status_code == 401
 
 
 def test_non_member_is_refused(client, users):
@@ -40,12 +38,38 @@ def test_me_reports_role(client, users):
     assert r["role"] == "nutritionist" and len(r["nutrients"]) == 31
 
 
+def test_calcium_phosphorus_ratio_is_recomputed_from_immutable_snapshot(client, users, admin_db):
+    n, f = users["nutritionist"]["h"], users["formulator"]["h"]
+    material = ing(client, n, "Ratio check", 20, 10, 2.5,
+                   nutrients={"calcium": 1.07, "phosphorus": 4.08})
+    pid = product(client, f, "Ratio check recipe")
+    body = {"product_id": pid, "batch_size_kg": 100,
+            "lines": [{"ref_type": "ingredient", "ref_id": material, "quantity_kg": 100}]}
+    result = client.post("/api/formulations", json=body, headers=f).json()
+    admin_db.execute("update public.formulations set summary=jsonb_set(summary, '{nutrients,ca_p_ratio}', '0'::jsonb, true) where id=%s",
+                     [result["id"]])
+    detail = client.get(f"/api/formulations/{result['id']}", headers=f).json()
+    assert detail["summary"]["nutrients"]["ca_p_ratio"] == pytest.approx(1.07 / 4.08)
+
+
+def test_calcium_phosphorus_target_flags_zero_phosphorus(client, users):
+    n, f = users["nutritionist"]["h"], users["formulator"]["h"]
+    material = ing(client, n, "Zero P check", 20, 10, 2.5,
+                   nutrients={"calcium": 1.0, "phosphorus": 0.0})
+    pid = product(client, f, "Zero P recipe")
+    body = {"product_id": pid, "batch_size_kg": 100, "targets": {"ca_p_ratio": {"min": 1}},
+            "lines": [{"ref_type": "ingredient", "ref_id": material, "quantity_kg": 100}]}
+    result = client.post("/api/formulations", json=body, headers=f).json()
+    assert result["summary"]["nutrients"]["ca_p_ratio"] is None
+    assert any("total phosphorus is zero or missing" in w for w in result["summary"]["warnings"])
+
+
 # ---------------------------------------------------------------- roles
 def test_role_permissions(client, users):
     a, n, f, v = (users[k]["h"] for k in ("admin", "nutritionist", "formulator", "viewer"))
     assert client.post("/api/ingredients", json={"name": "X"}, headers=f).status_code == 403
     assert client.post("/api/ingredients", json={"name": "X"}, headers=v).status_code == 403
-    iid = ing(client, n, "Maize", 40, 8, 3300)
+    iid = ing(client, n, "Maize", 40, 8, 3.3)
     assert client.put(f"/api/ingredients/{iid}", json={"name": "Maize2"}, headers=f).status_code == 403
     assert client.post(f"/api/ingredients/{iid}/active?active=false", headers=f).status_code == 403
     assert client.post("/api/products", json={"name": "P", "kind": "premix"}, headers=v).status_code == 403
@@ -59,7 +83,7 @@ def test_role_permissions(client, users):
 # ---------------------------------------------------------------- workflow
 def make_approved_premix(client, users, name="Layer Premix", note=None):
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, f"Maize-{name}", 40, 16, 3300)
+    m = ing(client, n, f"Maize-{name}", 40, 16, 3.3)
     pid = product(client, f, name)
     r = client.post("/api/formulations", json=recipe(pid, [(m, 100)]), headers=f)
     assert r.status_code == 201, r.text
@@ -96,7 +120,7 @@ def test_full_workflow_and_versioning(client, users):
 
 def test_only_reviewers_approve_and_flags_need_note(client, users):
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, "Maize", 40, 8, 3300)             # protein 8% -> misses the 14% target -> flag
+    m = ing(client, n, "Maize", 40, 8, 3.3)              # protein 8% -> misses the 14% target -> flag
     pid = product(client, f, "Flagged")
     fid = client.post("/api/formulations", json=recipe(pid, [(m, 100)]), headers=f).json()["id"]
     client.post(f"/api/formulations/{fid}/submit", headers=f)
@@ -110,7 +134,7 @@ def test_only_reviewers_approve_and_flags_need_note(client, users):
 
 def test_return_for_changes_then_new_version(client, users):
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, "Maize", 40, 16, 3300)
+    m = ing(client, n, "Maize", 40, 16, 3.3)
     pid = product(client, f, "P")
     fid = client.post("/api/formulations", json=recipe(pid, [(m, 100)]), headers=f).json()["id"]
     client.post(f"/api/formulations/{fid}/submit", headers=f)
@@ -122,7 +146,7 @@ def test_return_for_changes_then_new_version(client, users):
 
 def test_formulator_cannot_touch_others_drafts(client, users):
     n, f, f2 = users["nutritionist"]["h"], users["formulator"]["h"], users["formulator2"]["h"]
-    m = ing(client, n, "Maize", 40, 16, 3300)
+    m = ing(client, n, "Maize", 40, 16, 3.3)
     pid = product(client, f, "P")
     fid = client.post("/api/formulations", json=recipe(pid, [(m, 100)]), headers=f).json()["id"]
     r = client.put(f"/api/formulations/{fid}", json={"batch_size_kg": 100, "lines": [{"ref_type": "ingredient", "ref_id": m, "quantity_kg": 100}]}, headers=f2)
@@ -153,7 +177,7 @@ def test_finished_feed_uses_approved_premix_snapshot(client, users):
 
 def test_inclusion_limits_flag_in_summary(client, users):
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, "Maize", 40, 16, 3300)
+    m = ing(client, n, "Maize", 40, 16, 3.3)
     pid = product(client, f, "P")
     body = recipe(pid, [(m, 100)])
     body["lines"][0]["max_pct"] = 50
@@ -164,12 +188,15 @@ def test_inclusion_limits_flag_in_summary(client, users):
 
 def test_validation(client, users):
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, "Maize", 40, 16, 3300)
+    m = ing(client, n, "Maize", 40, 16, 3.3)
     pid = product(client, f, "P")
     assert client.post("/api/ingredients", json={"name": "Bad", "nutrients": {"zinc": 3}}, headers=n).status_code == 422
+    assert client.post("/api/ingredients", json={"name": "Bad percent", "nutrients": {"protein": 101}}, headers=n).status_code == 422
     assert client.post("/api/ingredients", json={"name": "Maize"}, headers=n).status_code == 409      # duplicate name
     bad = recipe(pid, [(m, 100)])
     bad["lines"][0].update(min_pct=60, max_pct=40)
+    assert client.post("/api/formulations", json=bad, headers=f).status_code == 422
+    bad = recipe(pid, [(m, 100)], targets={"protein": {"max": 101}})
     assert client.post("/api/formulations", json=bad, headers=f).status_code == 422
     bad = recipe(pid, [(m, 100)], targets={"protein": {"min": 20, "max": 10}})
     assert client.post("/api/formulations", json=bad, headers=f).status_code == 422
@@ -184,7 +211,7 @@ def test_database_rules_hold_without_the_api(users, admin_db, client):
     import os
     TEST_DB = os.environ['DATABASE_URL']
     n, f = users["nutritionist"]["h"], users["formulator"]["h"]
-    m = ing(client, n, "Maize", 40, 16, 3300)
+    m = ing(client, n, "Maize", 40, 16, 3.3)
     pid = product(client, f, "P")
     fid = client.post("/api/formulations", json=recipe(pid, [(m, 100)]), headers=f).json()["id"]
     client.post(f"/api/formulations/{fid}/submit", headers=f)
@@ -208,7 +235,7 @@ def test_database_rules_hold_without_the_api(users, admin_db, client):
 
 # ---------------------------------------------------------------- optimizer
 def seed_opt(client, n):
-    return (ing(client, n, "Maize", 40, 8, 3300), ing(client, n, "Soya", 80, 44, 2400), ing(client, n, "Bran", 25, 12, 1800))
+    return (ing(client, n, "Maize", 40, 8, 3.3), ing(client, n, "Soya", 80, 44, 2.4), ing(client, n, "Bran", 25, 12, 1.8))
 
 
 def test_optimizer_matches_hand_calculation(client, users):
@@ -255,6 +282,17 @@ def test_optimizer_min_limit_on_unmodellable_item(client, users):
             "lines": [{"ref_type": "ingredient", "ref_id": x, "quantity_kg": 0, "min_pct": 5}]}
     r = client.post("/api/optimize", json=body, headers=n).json()
     assert r["status"] == "error" and "minimum inclusion" in r["message"]
+
+
+def test_optimizer_rejects_result_invalidated_by_rounding(client, users):
+    n = users["nutritionist"]["h"]
+    ing(client, n, "Cheap high protein", 1, 3, 3.0)
+    ing(client, n, "Costly low protein", 2, 0, 3.0)
+    body = {"kind": "premix", "batch_size_kg": 1,
+            "targets": {"protein": {"min": 1.00004}}, "lines": []}
+    result = client.post("/api/optimize", json=body, headers=n).json()
+    assert result["status"] == "rounded_infeasible"
+    assert any("below the minimum target" in warning for warning in result["warnings"])
 
 
 # ---------------------------------------------------------------- reports / history / backup

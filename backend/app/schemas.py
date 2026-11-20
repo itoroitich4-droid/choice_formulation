@@ -1,4 +1,5 @@
 from datetime import date
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -7,6 +8,7 @@ from .calc import NUTRIENT_KEYS
 
 Kind = Literal["premix", "finished_feed"]
 Role = Literal["admin", "nutritionist", "formulator", "viewer"]
+PERCENT_NUTRIENTS = set(NUTRIENT_KEYS) - {"me", "de", "ca_p_ratio"}
 
 
 class Range(BaseModel):
@@ -17,6 +19,8 @@ class Range(BaseModel):
     def _order(self):
         if self.min is not None and self.max is not None and self.min > self.max:
             raise ValueError("a minimum cannot be higher than its maximum")
+        if any(v is not None and not math.isfinite(v) for v in (self.min, self.max)):
+            raise ValueError("targets must be finite numbers")
         return self
 
 
@@ -49,8 +53,10 @@ class IngredientIn(BaseModel):
         _check_keys(v, "nutrient")
         if "ca_p_ratio" in v:
             raise ValueError("Ca:P Ratio is calculated from calcium and total phosphorus")
-        if any(x is not None and x < 0 for x in v.values()):
-            raise ValueError("nutrient values cannot be negative")
+        if any(x is not None and (not math.isfinite(x) or x < 0) for x in v.values()):
+            raise ValueError("nutrient values must be finite and cannot be negative")
+        if any(v.get(k) is not None and v[k] > 100 for k in PERCENT_NUTRIENTS):
+            raise ValueError("percentage nutrient values cannot exceed 100%")
         return {k: x for k, x in v.items() if x is not None}
 
 
@@ -65,7 +71,11 @@ class ProductIn(BaseModel):
     @field_validator("targets")
     @classmethod
     def _t(cls, v):
-        return _check_keys(v, "nutrient")
+        _check_keys(v, "nutrient")
+        for key, bounds in v.items():
+            if key in PERCENT_NUTRIENTS and any(x is not None and x > 100 for x in (bounds.min, bounds.max)):
+                raise ValueError(f"percentage targets for {key} cannot exceed 100%")
+        return v
 
 
 class LineIn(BaseModel):
@@ -92,7 +102,11 @@ class RecipeBody(BaseModel):
     @field_validator("targets")
     @classmethod
     def _t(cls, v):
-        return _check_keys(v, "nutrient")
+        _check_keys(v, "nutrient")
+        for key, bounds in v.items():
+            if key in PERCENT_NUTRIENTS and any(x is not None and x > 100 for x in (bounds.min, bounds.max)):
+                raise ValueError(f"percentage targets for {key} cannot exceed 100%")
+        return v
 
 
 class FormulationIn(RecipeBody):
@@ -113,7 +127,11 @@ class OptimizeIn(BaseModel):
     @field_validator("targets")
     @classmethod
     def _t(cls, v):
-        return _check_keys(v, "nutrient")
+        _check_keys(v, "nutrient")
+        for key, bounds in v.items():
+            if key in PERCENT_NUTRIENTS and any(x is not None and x > 100 for x in (bounds.min, bounds.max)):
+                raise ValueError(f"percentage targets for {key} cannot exceed 100%")
+        return v
 
 
 class ReviewIn(BaseModel):

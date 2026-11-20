@@ -16,9 +16,17 @@ async def lifespan(_: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="Choice Nutrition feed formulation API", version="1.0.0", lifespan=lifespan)
 s = get_settings()
-app.add_middleware(CORSMiddleware, allow_origins=s.cors_list, allow_methods=["*"], allow_headers=["*"])
+is_production = s.environment.strip().lower() == "production"
+if is_production:
+    s.validate_production()
+app = FastAPI(title="Choice Nutrition feed formulation API", version="1.0.0", lifespan=lifespan,
+              docs_url=None if is_production else "/docs",
+              redoc_url=None if is_production else "/redoc",
+              openapi_url=None if is_production else "/openapi.json")
+app.add_middleware(CORSMiddleware, allow_origins=s.cors_list,
+                   allow_methods=["GET", "POST", "PUT", "PATCH"],
+                   allow_headers=["Authorization", "Content-Type"])
 app.include_router(router)
 
 

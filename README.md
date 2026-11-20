@@ -25,13 +25,14 @@ security** and triggers therefore enforce the rules even if the API had a bug:
 * prices and analyses are snapshotted by the server when a recipe is saved or submitted (clients cannot supply them)
 
 The optimizer works in fractions of the batch: each material is bounded by its optional **Min % / Max % inclusion limits**, every
-nutrient target is a min/max constraint, and the HiGHS result is rounded to the gram. Materials without a price or without a value
+nutrient target is a min/max constraint, and the HiGHS result is rounded to 0.1 g then checked again against the limits. Materials without a price or without a value
 for a targeted nutrient are excluded and reported, never guessed. When no mix exists it tells you the best and worst each nutrient
 can reach under your limits. Approved premixes can be chosen as ingredients of finished feeds.
 
 ## 1. Database (Supabase)
 1. Create a Supabase project. In **Authentication > Users** invite your staff.
-2. In the **SQL editor** run `supabase/migrations/0001_schema.sql`, `0002_seed_catalogue.sql`, `0003_feed_parameters.sql`, `0004_ingredient_catalogue.sql` (the user-provided ingredient catalogue), then `0005_researched_ingredients.sql` (follow-up ingredients and sourced values).
+2. For a fresh database, run the migrations in order in the **SQL editor**: `0001_schema.sql`, `0002_seed_catalogue.sql`, `0003_feed_parameters.sql`, `0004_ingredient_catalogue.sql`, `0005_researched_ingredients.sql`, `0006_remove_unsupported_pigment_fields.sql`, `0007_editable_typical_ingredient_estimates.sql`. Keep a record of which versions have been applied.
+   If you already applied 0001-0005, run `0006_remove_unsupported_pigment_fields.sql` followed by `0007_editable_typical_ingredient_estimates.sql`. If you already applied 0001-0006, run only `0007_editable_typical_ingredient_estimates.sql`. Migration 0007 fills typical feed estimates and the explicitly supplied zero fields. Edit any estimate later from Ingredients > Edit product. Proprietary premixes and branded additives remain blank where a generic matrix would be unsafe; enter their label/COA analyses there.
 3. Make the first administrator: `insert into public.company_members (user_id, email, role) select id, email, 'admin' from auth.users where email = 'you@company.com';`
    After that, admins manage the team from **History & backup > Team access** (add a user's ID, email and role).
 4. Enable Supabase daily backups / point-in-time recovery and test a restore.
@@ -45,7 +46,7 @@ cp .env.example .env        # fill in DATABASE_URL, SUPABASE_URL, CORS_ORIGINS
 uvicorn app.main:app --port 8000
 ```
 Deploy anywhere that runs a container or Python (`backend/Dockerfile` is included): Render, Fly.io, Railway, Azure, a company server.
-It must be reachable over HTTPS. Interactive docs: `/docs`.
+It must be reachable over HTTPS. Set `ENVIRONMENT=production`; the API then requires HTTPS Supabase/CORS URLs, verifies the JWT issuer, and disables `/docs`, `/redoc`, and `/openapi.json`.
 
 ## 3. Web app
 ```bash
@@ -63,8 +64,11 @@ Offline: the app shell opens offline and an unsent new recipe is kept on the dev
 ```bash
 cd backend && pytest        # needs a PostgreSQL: set TEST_DATABASE_URL, apply tests/supabase_shim.sql then the migrations
 ```
-17 tests cover role permissions, the approval workflow and versioning, premix snapshots, optimizer results and limits,
+20 tests cover role permissions, the approval workflow and versioning, premix snapshots, optimizer results and limits,
 reports, and direct-database attempts to bypass the API. The browser flow (sign-in session, optimizer, approval, batch, reports) was also exercised end to end.
+
+## Production release gate
+Keep this as an internal pilot until a staging deployment has passed the API tests and frontend build, every migration has been applied in order, a backup restore has been exercised, and a qualified nutritionist has checked ingredient analyses, units, nutrient targets, and a sample recipe against supplier certificates or laboratory results. The software calculates from saved data; it does not certify a feed as safe or nutritionally adequate. Ingredient availability is not inventory tracking.
 
 ## What still needs Choice Nutrition's input
 Ingredient prices, laboratory/supplier analyses, nutrient targets and premix recipes must come from company records and be
